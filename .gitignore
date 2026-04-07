@@ -1,1 +1,9 @@
+# IDE
+.idea/
+
+# Тестовые файлы
+*.lz77
+*_decoded
+
+# Rust
 /target

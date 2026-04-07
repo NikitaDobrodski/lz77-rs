@@ -1,21 +1,18 @@
-mod token;
-mod encoder;
-mod decoder;
-mod serializer;
+mod tui;
+mod compression;
 
 use clap::{Parser, Subcommand};
-use encoder::Encoder;
-use decoder::Decoder;
-use serializer::Serializer;
-use std::fs::File;
-use std::io::{BufReader, BufWriter};
+use compression::encoder::Encoder;
+use compression::decoder::Decoder;
+use compression::serializer::Serializer;
+use std::io::Read;
 
 #[derive(Parser)]
 #[command(name = "lz77")]
 #[command(about = "LZ77 file compressor", long_about = None)]
 struct Cli {
     #[command(subcommand)]
-    command: Commands,
+    command: Option<Commands>,
 }
 
 #[derive(Subcommand)]
@@ -40,54 +37,58 @@ fn main() {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Encode { input, output } => {
-            let data = std::fs::read(&input).unwrap_or_else(|e| {
-                eprintln!("Error reading '{}': {}", input, e);
-                std::process::exit(1);
-            });
-
-            let enc = Encoder::new(255, 15);
-            let tokens = enc.encode(&data);
-
-            let file = File::create(&output).unwrap_or_else(|e| {
-                eprintln!("Error creating '{}': {}", output, e);
-                std::process::exit(1);
-            });
-            let mut writer = BufWriter::new(file);
-            let ser = Serializer::new();
-            ser.write_tokens(&tokens, &mut writer).unwrap_or_else(|e| {
-                eprintln!("Error writing: {}", e);
-                std::process::exit(1);
-            });
-
-            println!(
-                "Encoded: {} bytes → {} tokens",
-                data.len(),
-                tokens.len()
-            );
+        None => {
+            tui::run_tui().unwrap();
         }
 
-        Commands::Decode { input, output } => {
-            let file = File::open(&input).unwrap_or_else(|e| {
-                eprintln!("Error opening '{}': {}", input, e);
-                std::process::exit(1);
-            });
-            let mut reader = BufReader::new(file);
+        Some(Commands::Encode { input, output }) => {
+            const CHUNK_SIZE: usize = 4 * 1024 * 1024;
+
+            let original_size = std::fs::metadata(&input)
+                .expect("Не удалось прочитать файл").len();
+
+            let enc = Encoder::new(8192, 64);
             let ser = Serializer::new();
-            let tokens = ser.read_tokens(&mut reader).unwrap_or_else(|e| {
-                eprintln!("Error reading tokens: {}", e);
-                std::process::exit(1);
-            });
+
+            let in_file = std::fs::File::open(&input)
+                .expect("Не удалось открыть файл");
+            let mut reader = std::io::BufReader::new(in_file);
+
+            let out_file = std::fs::File::create(&output)
+                .expect("Не удалось создать файл");
+            let mut writer = std::io::BufWriter::new(out_file);
+
+            ser.write_header(&mut writer).unwrap();
+
+            let mut buf = vec![0u8; CHUNK_SIZE];
+            loop {
+                let n = reader.read(&mut buf).unwrap();
+                if n == 0 { break; }
+                let tokens = enc.encode(&buf[..n]);
+                for token in &tokens {
+                    ser.write_token(&mut writer, token).unwrap();
+                }
+            }
+
+            ser.write_end(&mut writer).unwrap();
+            println!("Сжато: {} байт", original_size);
+        }
+
+        Some(Commands::Decode { input, output }) => {
+            let in_file = std::fs::File::open(&input)
+                .expect("Не удалось открыть файл");
+            let mut reader = std::io::BufReader::new(in_file);
+            let ser = Serializer::new();
+            let tokens = ser.read_tokens(&mut reader)
+                .expect("Не удалось прочитать токены");
 
             let dec = Decoder::new();
             let data = dec.decode(&tokens);
 
-            std::fs::write(&output, &data).unwrap_or_else(|e| {
-                eprintln!("Error writing '{}': {}", output, e);
-                std::process::exit(1);
-            });
+            std::fs::write(&output, &data)
+                .expect("Не удалось записать файл");
 
-            println!("Decoded: {} tokens → {} bytes", tokens.len(), data.len());
+            println!("Распаковано: {} байт", data.len());
         }
     }
 }

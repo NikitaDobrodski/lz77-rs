@@ -1,4 +1,4 @@
-﻿use crate::token::Token;
+﻿use crate::compression::token::Token;
 
 pub struct Decoder;
 

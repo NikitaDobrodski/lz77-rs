@@ -1,6 +1,6 @@
-﻿use lz77_rs::encoder::Encoder;
-use lz77_rs::decoder::Decoder;
-use lz77_rs::serializer::Serializer;
+﻿use lz77_rs::compression::encoder::Encoder;
+use lz77_rs::compression::decoder::Decoder;
+use lz77_rs::compression::serializer::Serializer;
 use std::io::Cursor;
 
 fn roundtrip(input: &[u8]) -> bool {
